@@ -10,6 +10,8 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 const STALE_AFTER_SECONDS = 600;
+const COLLECT_INTERVAL_SECONDS = 180;
+const COLLECT_TIMEOUT_SECONDS = 100;
 
 function usd(value) {
     if (value === null || value === undefined)
@@ -25,9 +27,10 @@ function amount(value) {
     return Number.isFinite(number) ? number : null;
 }
 
-// A fresh GType name lets GNOME's Looking Glass reload a changed module in
-// the same Shell process without colliding with the previously loaded class.
-const CloudCostIndicator = GObject.registerClass({
+// Register only during enable(), not while extension.js is imported. Use a
+// fresh GType name so a reloaded module never collides with the previous one.
+function createIndicatorClass() {
+    return GObject.registerClass({
     GTypeName: `CloudCostIndicator_${GLib.uuid_string_random().replaceAll('-', '')}`,
 }, class CloudCostIndicator extends PanelMenu.Button {
     _init(directory) {
@@ -73,7 +76,7 @@ const CloudCostIndicator = GObject.registerClass({
         for (const [index, id] of ids.entries()) {
             const group = new St.BoxLayout({style_class: 'cloud-cost-provider'});
             const iconFile = Gio.File.new_for_path(GLib.build_filenamev([
-                this._directory, 'providers', id, 'icon.svg',
+                this._directory, 'icons', `${id}.svg`,
             ]));
             const icon = iconFile.query_exists(null)
                 ? {gicon: new Gio.FileIcon({file: iconFile})}
@@ -137,7 +140,7 @@ const CloudCostIndicator = GObject.registerClass({
             this._updatePanel({}, true);
             for (const id of this._ids)
                 this._rows[id].label.text = `${this._titles[id] ?? id}: - (unavailable)`;
-            this._footer.label.text = 'No collector data (see README)';
+            this._footer.label.text = 'No collector data (see project setup instructions)';
             return;
         }
 
@@ -159,9 +162,11 @@ const CloudCostIndicator = GObject.registerClass({
                 text += ` (${[...new Set(errors)].join('; ')})`;
             this._rows[id].label.text = text;
         }
-        this._footer.label.text = Number.isFinite(age)
-            ? `${stale ? 'Stale · ' : ''}Updated ${new Date(updated).toLocaleTimeString()}`
-            : 'Invalid update time';
+        this._footer.label.text = Object.values(providers).every(row => row?.configured === false)
+            ? 'Add provider keys using secret-tool (see project URL)'
+            : Number.isFinite(age)
+                ? `${stale ? 'Stale · ' : ''}Updated ${new Date(updated).toLocaleTimeString()}`
+                : 'Invalid update time';
     }
 
     destroy() {
@@ -172,14 +177,69 @@ const CloudCostIndicator = GObject.registerClass({
         super.destroy();
     }
 });
+}
 
 export default class CloudCostExtension extends Extension {
     enable() {
-        this._indicator = new CloudCostIndicator(this.path);
+        this._indicator = new (createIndicatorClass())(this.path);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
+        this._collect();
+        this._collectTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
+            COLLECT_INTERVAL_SECONDS, () => {
+                this._collect();
+                return GLib.SOURCE_CONTINUE;
+            });
+    }
+
+    _collect() {
+        // Never pass credentials through Shell, argv, environment, or IPC.
+        if (this._collector)
+            return;
+        try {
+            const path = GLib.build_filenamev([this.path, 'collector.js']);
+            const process = Gio.Subprocess.new(['gjs', '-m', path],
+                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
+            this._collector = process;
+            this._watchdog = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
+                COLLECT_TIMEOUT_SECONDS, () => {
+                    process.force_exit();
+                    this._watchdog = 0;
+                    return GLib.SOURCE_REMOVE;
+                });
+            process.wait_async(null, (source, result) => {
+                try {
+                    source.wait_finish(result);
+                    if (this._collector === process && !source.get_successful())
+                        console.warn('Cloud Cost collector failed; check dependencies and cache permissions');
+                } catch (_) {
+                    // Never log provider exceptions, which could contain response data.
+                }
+                if (this._collector !== process)
+                    return;
+                this._collector = null;
+                if (this._watchdog) {
+                    GLib.Source.remove(this._watchdog);
+                    this._watchdog = 0;
+                }
+                this._indicator?._refresh();
+            });
+        } catch (_) {
+            console.warn('Cloud Cost collector could not start; check GJS installation');
+            // The existing status will expire and the panel will mark it stale.
+        }
     }
 
     disable() {
+        if (this._collectTimer) {
+            GLib.Source.remove(this._collectTimer);
+            this._collectTimer = 0;
+        }
+        if (this._watchdog) {
+            GLib.Source.remove(this._watchdog);
+            this._watchdog = 0;
+        }
+        this._collector?.force_exit();
+        this._collector = null;
         this._indicator?.destroy();
         this._indicator = null;
     }

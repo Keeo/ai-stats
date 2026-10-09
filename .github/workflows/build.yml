@@ -1,0 +1,63 @@
+name: Build GNOME extension
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GJS and GNOME packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            gnome-shell gjs gir1.2-secret-1 gir1.2-soup-3.0 unzip
+      - name: Check JavaScript and run collector tests
+        run: |
+          node --check extension/extension.js
+          node --check extension/collector.js
+          node --check extension/collector-core.js
+          gjs -m tests/test_collector.js
+      - name: Build and verify extension ZIP
+        run: |
+          bash ./pack.sh
+          unzip -t dist/cloud-cost@keeo.github.io.shell-extension.zip
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-cost-gnome-extension
+          path: dist/cloud-cost@keeo.github.io.shell-extension.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloud-cost-gnome-extension
+          path: dist
+      - name: Publish ZIP to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          zip='dist/cloud-cost@keeo.github.io.shell-extension.zip'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$zip" --clobber
+          else
+            gh release create "$TAG" "$zip" --verify-tag --generate-notes
+          fi

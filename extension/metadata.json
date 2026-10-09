@@ -1,6 +1,7 @@
 {
-  "uuid": "cloud-cost@local",
+  "uuid": "cloud-cost@keeo.github.io",
   "name": "Cloud Cost",
-  "description": "Cloud provider credit and trailing-hour spending",
-  "shell-version": ["50"]
+  "description": "OpenRouter and RunPod credit and spending over the last hour",
+  "shell-version": ["50"],
+  "url": "https://github.com/Keeo/gnome-ai-cloud-cost"
 }

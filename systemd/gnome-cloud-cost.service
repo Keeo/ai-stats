@@ -1,8 +1,0 @@
-[Unit]
-Description=Fetch cloud credits and trailing-hour spending
-
-[Service]
-Type=oneshot
-WorkingDirectory=%h/.local/libexec/gnome-cloud-cost
-ExecStart=/usr/bin/python3 -m collector.cloud_cost
-TimeoutStartSec=100s

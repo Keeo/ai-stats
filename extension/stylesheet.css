@@ -1,0 +1,25 @@
+.cloud-cost-bar {
+    spacing: 18px;
+    padding: 0 4px;
+}
+
+.cloud-cost-provider {
+    spacing: 3px;
+}
+
+.cloud-cost-icon {
+    margin-right: 2px;
+    -st-icon-style: symbolic;
+}
+
+.cloud-cost-dot, .cloud-cost-stale {
+    opacity: 0.7;
+}
+
+.cloud-cost-rate-warning {
+    color: #ffac4b;
+}
+
+.cloud-cost-rate-danger {
+    color: #ff6262;
+}

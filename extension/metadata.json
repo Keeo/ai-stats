@@ -1,0 +1,6 @@
+{
+  "uuid": "cloud-cost@local",
+  "name": "Cloud Cost",
+  "description": "Cloud provider credit and trailing-hour spending",
+  "shell-version": ["50"]
+}

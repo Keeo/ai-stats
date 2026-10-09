@@ -1,5 +1,9 @@
 # Cloud Cost for GNOME
 
+See your OpenRouter and RunPod credit and spending over the last hour from the GNOME top bar.
+
+![GNOME top bar showing provider credit and trailing-hour spend](image.png)
+
 Minimal GNOME Shell 50 top-bar indicator: **provider mark + credit · trailing-hour spend** for each installed provider (initially OpenRouter and RunPod). Click for provider details, errors and data age. Each credit is floored to a whole dollar and each trailing-hour spend is rounded **up** to the first decimal (`$0.9/h` means *spent in the last hour*, not a projected instantaneous hourly rate). Top-bar spend (and its middle dot) is hidden when the last-hour amount is below $0.001; unknown or stale values instead show `-`, never a misleading zero. The dropdown still shows the provider's spending status. Spend over $1 turns orange; spend over 5% of that provider's current credit turns red (red takes priority). The subtle, monochrome SVG marks are cropped from each provider's official logo.
 
 ## Install

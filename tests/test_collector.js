@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import {collect, recordBalance} from '../extension/collector-core.js';
+import {discoverProviders} from '../extension/provider-loader.js';
+import * as openrouter from '../extension/providers/openrouter/provider.js';
+import * as runpod from '../extension/providers/runpod/provider.js';
+
+const providers = [
+    {id: 'openrouter', ...openrouter},
+    {id: 'runpod', ...runpod},
+];
 
 const NOW = new Date('2026-01-02T12:30:00Z');
 function assert(ok, message) {
@@ -35,7 +45,9 @@ function fetch(url, key, payload = null) {
 function run(lookup = id => ({openrouter: 'or-key', runpod: 'rp-key'})[id],
     request = fetch, previous = []) {
     let saved;
-    const status = collect(NOW, lookup, request, () => previous, samples => { saved = samples; });
+    const status = collect(NOW, providers, lookup, request,
+        id => { equal(id, 'runpod'); return previous; },
+        (id, samples) => { equal(id, 'runpod'); saved = samples; });
     return {status, saved};
 }
 
@@ -51,6 +63,15 @@ status = run(id => id === 'runpod' ? null : 'or-key').status;
 equal(status.providers.runpod.configured, false);
 equal(status.providers.runpod.last_hour_spend, null);
 equal(status.providers.openrouter.last_hour_spend, '0.3');
+
+status = run(() => null).status;
+equal(status.providers.openrouter.configured, false);
+equal(status.providers.runpod.configured, false);
+
+status = run(() => { throw new Error('Keyring locked'); }).status;
+equal(status.providers.openrouter.configured, null);
+equal(status.providers.runpod.configured, null);
+assert(status.providers.openrouter.balance_error.includes('Secret Service'));
 
 status = run(() => 'or-key', (url, key, payload) => {
     const response = fetch(url, key, payload);
@@ -83,5 +104,40 @@ const backwards = recordBalance(NOW, 9, [
 ]);
 equal(backwards.estimate, null);
 equal(backwards.samples.length, 1);
+
+// Discovery accepts new provider folders without changes to the collector or Shell.
+const bundled = Gio.File.new_for_uri(import.meta.url).get_parent().get_parent()
+    .get_child('extension').get_child('providers').get_path();
+const discovered = await discoverProviders(bundled);
+equal(discovered.map(provider => provider.id).join(','), 'openrouter,runpod');
+const temp = Gio.File.new_for_path(GLib.dir_make_tmp('cloud-cost-test-XXXXXX'));
+const extra = temp.get_child('custom');
+extra.make_directory(null);
+const moduleFile = extra.get_child('provider.js');
+const iconFile = extra.get_child('icon.svg');
+const incomplete = temp.get_child('incomplete');
+incomplete.make_directory(null);
+try {
+    moduleFile.replace_contents('export const name = "Custom"; export const balance = () => 12; export const spend = () => 0.5;',
+        null, false, Gio.FileCreateFlags.NONE, null);
+    iconFile.replace_contents('<svg xmlns="http://www.w3.org/2000/svg"/>',
+        null, false, Gio.FileCreateFlags.NONE, null);
+    const added = await discoverProviders(temp.get_path());
+    equal(added.map(provider => provider.id).join(','), 'custom');
+    const custom = collect(NOW, added, () => 'custom-key', () => { throw new Error('No HTTP needed'); },
+        () => { throw new Error('No samples needed'); }, () => {});
+    equal(custom.providers.custom.balance, '12');
+    equal(custom.providers.custom.last_hour_spend, '0.5');
+    equal(Object.keys(custom.providers).length, 1);
+    const missing = collect(NOW, added, () => null, () => { throw new Error('Should not fetch'); },
+        () => [], () => {});
+    equal(missing.providers.custom.configured, false);
+} finally {
+    moduleFile.delete(null);
+    iconFile.delete(null);
+    extra.delete(null);
+    incomplete.delete(null);
+    temp.delete(null);
+}
 
 print('Collector tests passed');

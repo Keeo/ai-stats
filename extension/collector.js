@@ -6,11 +6,14 @@ import Secret from 'gi://Secret?version=1';
 import Soup from 'gi://Soup?version=3.0';
 import System from 'system';
 
-import {collect, ProviderError} from './collector-core.js';
+import {collect} from './collector-core.js';
+import {ProviderError} from './provider-utils.js';
+import {discoverProviders} from './provider-loader.js';
 
 const cacheDir = GLib.build_filenamev([GLib.get_user_cache_dir(), 'gnome-cloud-cost']);
 const statusPath = GLib.build_filenamev([cacheDir, 'status.json']);
-const samplesPath = GLib.build_filenamev([cacheDir, 'runpod-samples.json']);
+const providersDir = Gio.File.new_for_uri(import.meta.url).get_parent().get_child('providers').get_path();
+const samplesPath = id => GLib.build_filenamev([cacheDir, `${id}-samples.json`]);
 const session = new Soup.Session({timeout: 15, user_agent: 'CloudCost/1.0'});
 
 function readJson(path) {
@@ -63,20 +66,21 @@ function fetchJson(url, key, payload = null) {
     }
 }
 
-function main() {
-    const status = collect(new Date(), lookup, fetchJson,
-        () => {
+async function main() {
+    const providers = await discoverProviders(providersDir);
+    const status = collect(new Date(), providers, lookup, fetchJson,
+        id => {
             try {
-                return readJson(samplesPath);
+                return readJson(samplesPath(id));
             } catch (_) {
                 return [];
             }
-        }, samples => publish(samplesPath, samples));
+        }, (id, samples) => publish(samplesPath(id), samples));
     publish(statusPath, status);
 }
 
 try {
-    main();
+    await main();
 } catch (_) {
     // A failure to publish is signalled by exit status, not an exception that might leak data.
     System.exit(1);

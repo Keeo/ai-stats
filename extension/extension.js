@@ -42,6 +42,10 @@ function createIndicatorClass() {
         this._rows = {};
         this._titles = {};
         this._ids = [];
+        this._cancellable = new Gio.Cancellable();
+        this._refreshing = false;
+        this._refreshPending = false;
+        this._destroyed = false;
         this._staleLabel = new St.Label({
             text: 'stale', visible: false, y_align: Clutter.ActorAlign.CENTER,
             style_class: 'cloud-cost-stale',
@@ -61,9 +65,10 @@ function createIndicatorClass() {
     }
 
     _syncProviders(providers) {
-        // The collector's cache is the provider manifest. Rebuild only when its
-        // IDs change, so adding/removing a folder needs no Shell code change.
-        const ids = Object.keys(providers).filter(id => /^[a-z][a-z0-9_-]*$/.test(id)).sort();
+        // Hide providers without a key. An inaccessible keyring leaves
+        // configured unknown, so its error remains visible in the menu.
+        const ids = Object.keys(providers).filter(id =>
+            /^[a-z][a-z0-9_-]*$/.test(id) && providers[id]?.configured !== false).sort();
         if (ids.join('\0') === this._ids.join('\0'))
             return;
         for (const id of this._ids) {
@@ -76,7 +81,7 @@ function createIndicatorClass() {
         for (const [index, id] of ids.entries()) {
             const group = new St.BoxLayout({style_class: 'cloud-cost-provider'});
             const iconFile = Gio.File.new_for_path(GLib.build_filenamev([
-                this._directory, 'icons', `${id}.svg`,
+                this._directory, 'providers', id, 'icon.svg',
             ]));
             const icon = iconFile.query_exists(null)
                 ? {gicon: new Gio.FileIcon({file: iconFile})}
@@ -124,26 +129,50 @@ function createIndicatorClass() {
                 segment.rate.add_style_class_name('cloud-cost-rate-warning');
             }
         }
-        this._staleLabel.visible = stale;
+        this._staleLabel.text = this._ids.length ? 'stale' : 'Cloud Cost';
+        this._staleLabel.visible = stale || this._ids.length === 0;
     }
 
     _refresh() {
-        const path = GLib.build_filenamev([GLib.get_user_cache_dir(),
-            'gnome-cloud-cost', 'status.json']);
-        let status;
-        try {
-            const [ok, contents] = Gio.File.new_for_path(path).load_contents(null);
-            if (!ok)
-                throw new Error('Cannot read status file');
-            status = JSON.parse(new TextDecoder().decode(contents));
-        } catch (_error) {
-            this._updatePanel({}, true);
-            for (const id of this._ids)
-                this._rows[id].label.text = `${this._titles[id] ?? id}: - (unavailable)`;
-            this._footer.label.text = 'No collector data (see project setup instructions)';
+        if (this._destroyed)
+            return;
+        if (this._refreshing) {
+            this._refreshPending = true;
             return;
         }
+        this._refreshing = true;
+        const path = GLib.build_filenamev([GLib.get_user_cache_dir(),
+            'gnome-cloud-cost', 'status.json']);
+        const file = Gio.File.new_for_path(path);
+        file.load_contents_async(this._cancellable, (source, result) => {
+            try {
+                const [ok, contents] = source.load_contents_finish(result);
+                if (this._destroyed)
+                    return;
+                if (!ok)
+                    throw new Error('Cannot read status file');
+                this._showStatus(JSON.parse(new TextDecoder().decode(contents)));
+            } catch (_error) {
+                if (!this._destroyed)
+                    this._showUnavailable();
+            } finally {
+                this._refreshing = false;
+                if (this._refreshPending && !this._destroyed) {
+                    this._refreshPending = false;
+                    this._refresh();
+                }
+            }
+        });
+    }
 
+    _showUnavailable() {
+        this._updatePanel({}, true);
+        for (const id of this._ids)
+            this._rows[id].label.text = `${this._titles[id] ?? id}: - (unavailable)`;
+        this._footer.label.text = 'No collector data (see project setup instructions)';
+    }
+
+    _showStatus(status) {
         const updated = Date.parse(status.updated_at);
         const age = (Date.now() - updated) / 1000;
         const stale = !Number.isFinite(age) || age < -60 || age > STALE_AFTER_SECONDS;
@@ -170,6 +199,8 @@ function createIndicatorClass() {
     }
 
     destroy() {
+        this._destroyed = true;
+        this._cancellable.cancel();
         if (this._timer) {
             GLib.Source.remove(this._timer);
             this._timer = 0;

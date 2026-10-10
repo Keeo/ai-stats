@@ -25,6 +25,9 @@ jobs:
           node --check extension/extension.js
           node --check extension/collector.js
           node --check extension/collector-core.js
+          node --check extension/provider-loader.js
+          node --check extension/provider-utils.js
+          for file in extension/providers/*/provider.js; do node --check "$file"; done
           gjs -m tests/test_collector.js
       - name: Build and verify extension ZIP
         run: |

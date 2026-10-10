@@ -1,83 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Pure collection logic. The separate collector.js process supplies keyring, HTTP and disk I/O.
+// Pure collection logic. The separate collector.js process supplies providers, keyring, HTTP and disk I/O.
+import {money, dollars, iso, timestamp, ProviderError} from './provider-utils.js';
 
 const HOUR = 60 * 60 * 1000;
-const AMOUNTS = [
-    'gpuCloudAmount', 'cpuCloudAmount', 'serverlessAmount',
-    'storageAmount', 'runpodEndpointAmount',
-];
-
-export class ProviderError extends Error {}
-
-function money(value) {
-    if ((typeof value !== 'number' && typeof value !== 'string') ||
-        (typeof value === 'string' && !value.trim()))
-        throw new Error('Missing amount');
-    const number = Number(value);
-    if (!Number.isFinite(number))
-        throw new Error('Invalid amount');
-    return number;
-}
-
-// Avoid exposing floating-point summation artifacts without erasing tiny charges.
-function dollars(value) {
-    return String(Number(value.toPrecision(15)));
-}
-
-function iso(time) {
-    return time.toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
-
-function timestamp(value) {
-    if (typeof value !== 'string' || !/(Z|[+-]\d\d:\d\d)$/.test(value))
-        throw new Error('Missing time zone');
-    const result = Date.parse(value);
-    if (!Number.isFinite(result))
-        throw new Error('Invalid timestamp');
-    return result;
-}
-
-export function openrouterBalance(key, fetch) {
-    const data = fetch('https://openrouter.ai/api/v1/credits', key).data;
-    return money(data.total_credits) - money(data.total_usage);
-}
-
-export function openrouterSpend(key, now, fetch) {
-    const data = fetch('https://openrouter.ai/api/v1/analytics/query', key, {
-        metrics: ['total_usage'], granularity: 'minute',
-        time_range: {start: iso(new Date(now.getTime() - HOUR)), end: iso(now)},
-    }).data;
-    if (data.metadata.truncated || data.warnings?.length)
-        throw new ProviderError('OpenRouter analytics response is incomplete');
-    if (!Array.isArray(data.data))
-        throw new ProviderError('OpenRouter analytics rows missing');
-    return data.data.reduce((sum, row) => sum + money(row.total_usage), 0);
-}
-
-function runpodQuery(key, query, fetch) {
-    const response = fetch('https://api.runpod.io/graphql', key, {query});
-    if (response.errors?.length)
-        throw new ProviderError('RunPod GraphQL query rejected');
-    return response.data.myself;
-}
-
-export function runpodBalance(key, fetch) {
-    return money(runpodQuery(key, 'query { myself { clientBalance } }', fetch).clientBalance);
-}
-
-export function runpodSpend(key, now, fetch) {
-    const query = 'query { myself { billing(input: {granularity: MINUTELY}) { summary { time gpuCloudAmount cpuCloudAmount serverlessAmount storageAmount runpodEndpointAmount } } } }';
-    const rows = runpodQuery(key, query, fetch).billing.summary;
-    if (!Array.isArray(rows))
-        throw new ProviderError('RunPod billing summary unavailable');
-    const end = now.getTime();
-    return rows.reduce((sum, row) => {
-        const time = timestamp(row.time);
-        if (time < end - HOUR || time > end)
-            return sum;
-        return sum + AMOUNTS.reduce((subtotal, field) => subtotal + money(row[field] ?? 0), 0);
-    }, 0);
-}
 
 // Called after every successful balance poll, including when billing succeeds.
 // An increase clears the window: a smaller refill masked by charges cannot be detected.
@@ -113,15 +38,11 @@ function safeError(error) {
     return error instanceof ProviderError ? error.message : 'Unexpected provider response';
 }
 
-export function collect(now, lookup, fetch, readSamples, writeSamples) {
+export function collect(now, providers, lookup, fetch, readSamples, writeSamples) {
     const status = {updated_at: iso(now), providers: {}};
-    const providers = [
-        {id: 'openrouter', name: 'OpenRouter', balance: openrouterBalance, spend: openrouterSpend},
-        {id: 'runpod', name: 'RunPod', balance: runpodBalance, spend: runpodSpend},
-    ];
     for (const provider of providers) {
         const row = {
-            name: provider.name, configured: false, balance: null, last_hour_spend: null,
+            name: provider.name, configured: null, balance: null, last_hour_spend: null,
             balance_error: null, spend_error: null, spend_source: null, spend_note: null,
         };
         status.providers[provider.id] = row;
@@ -133,6 +54,7 @@ export function collect(now, lookup, fetch, readSamples, writeSamples) {
             continue;
         }
         if (!key) {
+            row.configured = false;
             row.balance_error = row.spend_error = `No ${provider.name} key in GNOME Keyring`;
             continue;
         }
@@ -145,10 +67,10 @@ export function collect(now, lookup, fetch, readSamples, writeSamples) {
             row.balance_error = safeError(error);
         }
         let estimate = null;
-        if (provider.id === 'runpod' && balance !== null) {
+        if (provider.estimateFromBalance && balance !== null) {
             try {
-                const history = recordBalance(now, balance, readSamples());
-                writeSamples(history.samples);
+                const history = recordBalance(now, balance, readSamples(provider.id));
+                writeSamples(provider.id, history.samples);
                 estimate = history.estimate;
             } catch (_) {
                 // Billing may still work even if history cannot be saved.
@@ -162,8 +84,8 @@ export function collect(now, lookup, fetch, readSamples, writeSamples) {
                 row.last_hour_spend = dollars(estimate);
                 row.spend_source = 'balance_estimate';
                 row.spend_note = 'Estimate from balance changes; small refills may be missed';
-            } else if (provider.id === 'runpod' && balance !== null) {
-                row.spend_error = 'RunPod billing unavailable; collecting ~1h of balance history';
+            } else if (provider.estimateFromBalance && balance !== null) {
+                row.spend_error = `${provider.name} billing unavailable; collecting ~1h of balance history`;
             } else {
                 row.spend_error = safeError(error);
             }

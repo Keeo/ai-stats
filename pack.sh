@@ -7,12 +7,24 @@ mkdir -p "$out"
 gnome-extensions pack --force --out-dir="$out" \
     --extra-source="$root/extension/collector.js" \
     --extra-source="$root/extension/collector-core.js" \
-    --extra-source="$root/extension/icons" \
+    --extra-source="$root/extension/provider-utils.js" \
+    --extra-source="$root/extension/provider-loader.js" \
+    --extra-source="$root/extension/providers" \
     --extra-source="$root/LICENSE" \
     "$root/extension"
 zip="$out/cloud-cost@keeo.github.io.shell-extension.zip"
 for file in metadata.json extension.js stylesheet.css collector.js collector-core.js \
-    icons/openrouter.svg icons/runpod.svg LICENSE; do
+    provider-utils.js provider-loader.js LICENSE; do
     unzip -Z1 "$zip" | grep -Fxq "$file" || { echo "Missing from ZIP: $file" >&2; exit 1; }
+done
+for folder in "$root"/extension/providers/*; do
+    [[ -d "$folder" ]] || continue
+    id="${folder##*/}"
+    [[ "$id" =~ ^[a-z][a-z0-9_-]*$ ]] || continue
+    for file in provider.js icon-symbolic.svg; do
+        unzip -Z1 "$zip" | grep -Fxq "providers/$id/$file" || {
+            echo "Missing from ZIP: providers/$id/$file" >&2; exit 1;
+        }
+    done
 done
 printf 'Ready: %s\n' "$zip"

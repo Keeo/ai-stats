@@ -32,7 +32,7 @@ The bundled collector runs in a separate GJS process so API keys never enter GNO
 
 Create `extension/providers/<id>/` (lowercase letter followed by lowercase letters, digits, `_` or `-`) containing:
 
-- `icon.svg`: the top-bar icon (the bundled providers use the original icons).
+- `icon-symbolic.svg`: the top-bar icon. Use a GNOME symbolic SVG (for example, strokes and fills in `#2e3436`) so Shell recolors it for light and dark panels.
 - `provider.js`: an ES module exporting `name` (display name), `balance(key, fetch)` (remaining credit in USD), and `spend(key, now, fetch)` (USD spent during the preceding hour). `now` is a `Date`; `fetch(url, key, payload?)` returns parsed JSON and uses POST when given a payload. See the existing folders for examples. Optionally export `estimateFromBalance = true` to fall back to an hour of balance samples when billing fails.
 
 Store its key with `secret-tool store --label='Cloud Cost: <name>' service gnome-cloud-cost provider <id>` (run interactively), then run `bash ./pack.sh` and reinstall the ZIP. The collector discovers valid provider folders and publishes their results; the panel builds its rows and loads each folder's icon from the collector's key-free status. Neither collector nor panel nor pack script needs a per-provider edit. Avoid including keys or raw API responses in errors; unexpected errors are hidden from the status cache.

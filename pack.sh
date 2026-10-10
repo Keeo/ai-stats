@@ -21,7 +21,7 @@ for folder in "$root"/extension/providers/*; do
     [[ -d "$folder" ]] || continue
     id="${folder##*/}"
     [[ "$id" =~ ^[a-z][a-z0-9_-]*$ ]] || continue
-    for file in provider.js icon.svg; do
+    for file in provider.js icon-symbolic.svg; do
         unzip -Z1 "$zip" | grep -Fxq "providers/$id/$file" || {
             echo "Missing from ZIP: providers/$id/$file" >&2; exit 1;
         }

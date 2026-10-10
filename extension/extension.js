@@ -81,7 +81,7 @@ function createIndicatorClass() {
         for (const [index, id] of ids.entries()) {
             const group = new St.BoxLayout({style_class: 'cloud-cost-provider'});
             const iconFile = Gio.File.new_for_path(GLib.build_filenamev([
-                this._directory, 'providers', id, 'icon.svg',
+                this._directory, 'providers', id, 'icon-symbolic.svg',
             ]));
             const icon = iconFile.query_exists(null)
                 ? {gicon: new Gio.FileIcon({file: iconFile})}

@@ -23,7 +23,7 @@ export async function discoverProviders(directory) {
     for (const id of ids.sort()) {
         const folder = root.get_child(id);
         const moduleFile = folder.get_child('provider.js');
-        if (!moduleFile.query_exists(null) || !folder.get_child('icon.svg').query_exists(null))
+        if (!moduleFile.query_exists(null) || !folder.get_child('icon-symbolic.svg').query_exists(null))
             continue;
         try {
             const module = await import(moduleFile.get_uri());

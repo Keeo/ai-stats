@@ -114,7 +114,7 @@ const temp = Gio.File.new_for_path(GLib.dir_make_tmp('cloud-cost-test-XXXXXX'));
 const extra = temp.get_child('custom');
 extra.make_directory(null);
 const moduleFile = extra.get_child('provider.js');
-const iconFile = extra.get_child('icon.svg');
+const iconFile = extra.get_child('icon-symbolic.svg');
 const incomplete = temp.get_child('incomplete');
 incomplete.make_directory(null);
 try {

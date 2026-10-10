@@ -64,13 +64,30 @@ function createIndicatorClass() {
         });
     }
 
+    _syncIcons() {
+        // An extension can become active while its ZIP is still being unpacked.
+        // Retry missing provider icons instead of keeping the fallback forever.
+        for (const id of this._ids) {
+            const icon = this._segments[id].icon;
+            if (icon.gicon instanceof Gio.FileIcon)
+                continue;
+            const file = Gio.File.new_for_path(GLib.build_filenamev([
+                this._directory, 'providers', id, 'icon-symbolic.svg',
+            ]));
+            if (file.query_exists(null))
+                icon.gicon = new Gio.FileIcon({file});
+        }
+    }
+
     _syncProviders(providers) {
         // Hide providers without a key. An inaccessible keyring leaves
         // configured unknown, so its error remains visible in the menu.
         const ids = Object.keys(providers).filter(id =>
             /^[a-z][a-z0-9_-]*$/.test(id) && providers[id]?.configured !== false).sort();
-        if (ids.join('\0') === this._ids.join('\0'))
+        if (ids.join('\0') === this._ids.join('\0')) {
+            this._syncIcons();
             return;
+        }
         for (const id of this._ids) {
             this._segments[id].group.destroy();
             this._rows[id].destroy();
@@ -80,16 +97,12 @@ function createIndicatorClass() {
         this._rows = {};
         for (const [index, id] of ids.entries()) {
             const group = new St.BoxLayout({style_class: 'cloud-cost-provider'});
-            const iconFile = Gio.File.new_for_path(GLib.build_filenamev([
-                this._directory, 'providers', id, 'icon-symbolic.svg',
-            ]));
-            const icon = iconFile.query_exists(null)
-                ? {gicon: new Gio.FileIcon({file: iconFile})}
-                : {icon_name: 'dialog-question-symbolic'};
-            group.add_child(new St.Icon({
-                ...icon, icon_size: 16, y_align: Clutter.ActorAlign.CENTER,
+            const icon = new St.Icon({
+                icon_name: 'dialog-question-symbolic', icon_size: 16,
+                y_align: Clutter.ActorAlign.CENTER,
                 style_class: 'cloud-cost-icon system-status-icon',
-            }));
+            });
+            group.add_child(icon);
             const credit = new St.Label({text: '-', y_align: Clutter.ActorAlign.CENTER});
             const rate = new St.Label({text: '-', y_align: Clutter.ActorAlign.CENTER});
             const dot = new St.Label({
@@ -99,11 +112,12 @@ function createIndicatorClass() {
             group.add_child(dot);
             group.add_child(rate);
             this._bar.insert_child_at_index(group, index);
-            this._segments[id] = {group, credit, dot, rate};
+            this._segments[id] = {group, icon, credit, dot, rate};
             const row = new PopupMenu.PopupMenuItem('', {reactive: false, can_focus: false});
             this.menu.addMenuItem(row, index);
             this._rows[id] = row;
         }
+        this._syncIcons();
     }
 
     _updatePanel(providers, stale) {

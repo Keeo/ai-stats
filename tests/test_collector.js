@@ -55,6 +55,7 @@ let {status, saved} = run();
 equal(status.updated_at, '2026-01-02T12:30:00Z');
 equal(status.providers.openrouter.balance, '65.75');
 equal(status.providers.openrouter.last_hour_spend, '0.3');
+equal(status.providers.runpod.name, 'Runpod');
 equal(status.providers.runpod.balance, '10.5');
 equal(status.providers.runpod.last_hour_spend, '0.28');
 equal(saved.length, 1);
@@ -114,13 +115,18 @@ const temp = Gio.File.new_for_path(GLib.dir_make_tmp('cloud-cost-test-XXXXXX'));
 const extra = temp.get_child('custom');
 extra.make_directory(null);
 const moduleFile = extra.get_child('provider.js');
-const iconFile = extra.get_child('icon-symbolic.svg');
+const iconFile = extra.get_child('icon.svg');
+const whiteIconFile = extra.get_child('icon-white.svg');
 const incomplete = temp.get_child('incomplete');
 incomplete.make_directory(null);
 try {
     moduleFile.replace_contents('export const name = "Custom"; export const balance = () => 12; export const spend = () => 0.5;',
         null, false, Gio.FileCreateFlags.NONE, null);
     iconFile.replace_contents('<svg xmlns="http://www.w3.org/2000/svg"/>',
+        null, false, Gio.FileCreateFlags.NONE, null);
+    // Both color modes must be available for every discovered provider.
+    equal((await discoverProviders(temp.get_path())).length, 0);
+    whiteIconFile.replace_contents('<svg xmlns="http://www.w3.org/2000/svg"/>',
         null, false, Gio.FileCreateFlags.NONE, null);
     const added = await discoverProviders(temp.get_path());
     equal(added.map(provider => provider.id).join(','), 'custom');
@@ -135,6 +141,7 @@ try {
 } finally {
     moduleFile.delete(null);
     iconFile.delete(null);
+    whiteIconFile.delete(null);
     extra.delete(null);
     incomplete.delete(null);
     temp.delete(null);

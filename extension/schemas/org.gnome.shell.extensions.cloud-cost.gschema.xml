@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.cloud-cost" path="/org/gnome/shell/extensions/cloud-cost/">
+    <key name="force-white-icons" type="b">
+      <default>false</default>
+      <summary>Use white provider icons</summary>
+      <description>Use the white logo variants in the top bar instead of the provider colors.</description>
+    </key>
+  </schema>
+</schemalist>

@@ -29,6 +29,7 @@ jobs:
           node --check extension/provider-utils.js
           for file in extension/providers/*/provider.js; do node --check "$file"; done
           gjs -m tests/test_collector.js
+          glib-compile-schemas --strict --dry-run extension/schemas
       - name: Build and verify extension ZIP
         run: |
           bash ./pack.sh

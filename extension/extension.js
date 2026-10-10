@@ -33,11 +33,12 @@ function createIndicatorClass() {
     return GObject.registerClass({
     GTypeName: `CloudCostIndicator_${GLib.uuid_string_random().replaceAll('-', '')}`,
 }, class CloudCostIndicator extends PanelMenu.Button {
-    _init(directory) {
+    _init(directory, settings) {
         super._init(0.5, 'Cloud spending');
         this._bar = new St.BoxLayout({style_class: 'cloud-cost-bar'});
         this.add_child(this._bar);
         this._directory = directory;
+        this._settings = settings;
         this._segments = {};
         this._rows = {};
         this._titles = {};
@@ -52,6 +53,16 @@ function createIndicatorClass() {
         });
         this._bar.add_child(this._staleLabel);
 
+        this._whiteIconsItem = new PopupMenu.PopupSwitchMenuItem(
+            'White provider icons', settings.get_boolean('force-white-icons'));
+        this._whiteIconsItem.connect('toggled', (_item, state) => {
+            settings.set_boolean('force-white-icons', state);
+        });
+        this.menu.addMenuItem(this._whiteIconsItem);
+        this._settingsChangedId = settings.connect('changed::force-white-icons', () => {
+            this._whiteIconsItem.setToggleState(settings.get_boolean('force-white-icons'));
+            this._syncIcons();
+        });
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._footer = new PopupMenu.PopupMenuItem('', {reactive: false, can_focus: false});
         this._footer.label.text = 'Waiting for collector';
@@ -65,17 +76,20 @@ function createIndicatorClass() {
     }
 
     _syncIcons() {
-        // An extension can become active while its ZIP is still being unpacked.
-        // Retry missing provider icons instead of keeping the fallback forever.
+        // Retry missing files if the extension becomes active while its ZIP is unpacked.
+        const filename = this._settings.get_boolean('force-white-icons')
+            ? 'icon-white.svg' : 'icon.svg';
         for (const id of this._ids) {
-            const icon = this._segments[id].icon;
-            if (icon.gicon instanceof Gio.FileIcon)
-                continue;
+            const segment = this._segments[id];
             const file = Gio.File.new_for_path(GLib.build_filenamev([
-                this._directory, 'providers', id, 'icon-symbolic.svg',
+                this._directory, 'providers', id, filename,
             ]));
-            if (file.query_exists(null))
-                icon.gicon = new Gio.FileIcon({file});
+            if (segment.iconPath === file.get_path() && segment.icon.gicon instanceof Gio.FileIcon)
+                continue;
+            if (file.query_exists(null)) {
+                segment.icon.gicon = new Gio.FileIcon({file});
+                segment.iconPath = file.get_path();
+            }
         }
     }
 
@@ -100,7 +114,7 @@ function createIndicatorClass() {
             const icon = new St.Icon({
                 icon_name: 'dialog-question-symbolic', icon_size: 16,
                 y_align: Clutter.ActorAlign.CENTER,
-                style_class: 'cloud-cost-icon system-status-icon',
+                style_class: 'cloud-cost-icon',
             });
             group.add_child(icon);
             const credit = new St.Label({text: '-', y_align: Clutter.ActorAlign.CENTER});
@@ -214,6 +228,7 @@ function createIndicatorClass() {
 
     destroy() {
         this._destroyed = true;
+        this._settings.disconnect(this._settingsChangedId);
         this._cancellable.cancel();
         if (this._timer) {
             GLib.Source.remove(this._timer);
@@ -226,7 +241,8 @@ function createIndicatorClass() {
 
 export default class CloudCostExtension extends Extension {
     enable() {
-        this._indicator = new (createIndicatorClass())(this.path);
+        this._settings = this.getSettings();
+        this._indicator = new (createIndicatorClass())(this.path, this._settings);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
         this._collect();
         this._collectTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
@@ -287,5 +303,6 @@ export default class CloudCostExtension extends Extension {
         this._collector = null;
         this._indicator?.destroy();
         this._indicator = null;
+        this._settings = null;
     }
 }
